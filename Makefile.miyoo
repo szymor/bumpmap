@@ -1,0 +1,15 @@
+.PHONY: all clean
+
+TARGET=bumpmap
+GCC=arm-linux-gcc
+PKGCONF=$(shell $(GCC) --print-sysroot)/../../bin/pkg-config
+CFLAGS=$(shell $(PKGCONF) --cflags sdl SDL_image SDL_gfx) -Ofast -march=armv5te -mtune=arm926ej-s
+LFLAGS=$(shell $(PKGCONF) --libs sdl SDL_image SDL_gfx) -lm -ljpeg -lpng -lz
+
+all: $(TARGET)
+
+clean:
+	-rm -rf $(TARGET)
+
+$(TARGET): main.c
+	$(GCC) main.c -o $(TARGET) $(CFLAGS) $(LFLAGS)

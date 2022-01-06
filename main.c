@@ -5,20 +5,19 @@
 #include <time.h>
 #include <SDL/SDL.h>
 #include <SDL/SDL_image.h>
+#include <SDL/SDL_gfxPrimitives.h>
 
 #define SCREEN_WIDTH		(320)
 #define SCREEN_HEIGHT		(240)
 #define SCREEN_BPP			(32)
-#define LIGHT_SIZE			(192)
+#define LIGHT_SIZE			(128)
 #define LIGHT_NUM			(3)
-
-#define blue(c)				((c) & 0xff)
-#define green(c)			(((c) >> 8) & 0xff)
-#define red(c)				(((c) >> 16) & 0xff)
 
 SDL_Surface *screen = NULL;
 SDL_Surface *light = NULL;
 SDL_Surface *heightmap = NULL;
+int fps = 0;
+bool fps_on = false;
 
 Uint32 getPixel(SDL_Surface *s, int x, int y)
 {
@@ -26,6 +25,15 @@ Uint32 getPixel(SDL_Surface *s, int x, int y)
 		return 0;
 	int i = y * s->w + x;
 	Uint32 *p = (Uint32*)s->pixels;
+	return p[i];
+}
+
+Uint32 getComponent(SDL_Surface *s, int x, int y, int subpixel)
+{
+	if (x < 0 || x >= s->w || y < 0 || y >= s->h)
+		return 0;
+	int i = 4 * (y * s->w + x) + subpixel;
+	Uint8 *p = (Uint8*)s->pixels;
 	return p[i];
 }
 
@@ -42,9 +50,9 @@ void setComponent(SDL_Surface *s, int x, int y, Uint8 c, int subpixel)
 {
 	if (x < 0 || x >= s->w || y < 0 || y >= s->h)
 		return;
-	int i = 4 * (y * s->w + x);
+	int i = 4 * (y * s->w + x) + subpixel;
 	Uint8 *p = (Uint8*)s->pixels;
-	p[i + subpixel] = c;
+	p[i] = c;
 }
 
 Uint32 mix(Uint32 pixel, Uint32 mask)
@@ -60,12 +68,34 @@ Uint32 mix(Uint32 pixel, Uint32 mask)
 	return val;
 }
 
+void fps_counter(double dt)
+{
+	static double total = 0;
+	static int count = 0;
+	total += dt;
+	++count;
+	if (total > 1.0)
+	{
+		fps = count;
+		total -= 1.0;
+		count = 0;
+	}
+}
+
+void fps_draw(void)
+{
+	char string[8] = "";
+	sprintf(string, "%d", fps);
+	stringRGBA(screen, 0, 0, string, 255, 255, 255, 255);
+}
+
 int main(int argc, char *argv[])
 {
 	srand(time(NULL));
 	SDL_Init(SDL_INIT_VIDEO);
 	screen = SDL_SetVideoMode(SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_BPP, SDL_HWSURFACE | SDL_DOUBLEBUF);
-	SDL_EnableKeyRepeat(100, 50);
+	//SDL_EnableKeyRepeat(100, 50);
+	SDL_ShowCursor(SDL_DISABLE);
 
 	// memory leaks, I know ;)
 	heightmap = IMG_Load("heightmap.png");
@@ -132,6 +162,9 @@ int main(int argc, char *argv[])
 							if (px >= SCREEN_WIDTH - LIGHT_SIZE / 2) px = SCREEN_WIDTH - LIGHT_SIZE / 2 - 1;
 							break;
 						*/
+						case SDLK_RETURN:
+							fps_on = !fps_on;
+							break;
 						case SDLK_ESCAPE:
 							quit = true;
 							break;
@@ -145,11 +178,13 @@ int main(int argc, char *argv[])
 		curr = SDL_GetTicks();
 		Uint32 delta = curr - prev;
 		prev = curr;
+		double dt = delta / 1000.0;
+		fps_counter(dt);
 
 		for (int i = 0; i < LIGHT_NUM; ++i)
 		{
-			px[i] += vx[i] * (delta / 1000.0);
-			py[i] += vy[i] * (delta / 1000.0);
+			px[i] += vx[i] * (dt);
+			py[i] += vy[i] * (dt);
 			if (px[i] < -LIGHT_SIZE / 2)
 			{
 				vx[i] = 20.0 + rand() % 40;
@@ -171,19 +206,15 @@ int main(int argc, char *argv[])
 		SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0, 0, 0));
 		//SDL_BlitSurface(heightmap, NULL, screen, NULL);
 		SDL_LockSurface(screen);
-		for (int y = 0; y < light->h; ++y)
-			for (int x = 0; x < light->w; ++x)
+		for (int i = 0; i < LIGHT_NUM; ++i)
+		{
+			int yy = py[i];
+			for (int y = 0; y < light->h; ++y, ++yy)
 			{
-				/*
-				Uint32 lp = getPixel(light, x, y);
-				Uint32 hp = getPixel(heightmap, x + px, y + py);
-				Uint32 c = mix(hp, lp);
-				setPixel(screen, x + px, y + py, c);
-				*/
-				for (int i = 0; i < LIGHT_NUM; ++i)
+				int xx = px[i];
+				int index = yy * screen->w + xx;
+				for (int x = 0; x < light->w; ++x, ++xx, ++index)
 				{
-					int yy = y + py[i];
-					int xx = x + px[i];
 					int nx;
 					int ny;
 					if (xx < 1 || xx >= SCREEN_WIDTH || yy < 1 || yy >= SCREEN_HEIGHT)
@@ -193,15 +224,17 @@ int main(int argc, char *argv[])
 					}
 					else
 					{
-						int ind = yy * screen->w + xx;
-						nx = normalx[ind];
-						ny = normaly[ind];
+						nx = normalx[index];
+						ny = normaly[index];
 					}
-					Uint32 c = getPixel(light, x - nx, y - ny);
-					setComponent(screen, x + px[i], y + py[i], c & 0xff, i);
+					Uint8 c = getComponent(light, x - nx, y - ny, i);
+					setComponent(screen, x + px[i], y + py[i], c, i);
 				}
 			}
+		}
 		SDL_UnlockSurface(screen);
+		if (fps_on)
+			fps_draw();
 		SDL_Flip(screen);
 	}
 	SDL_Quit();
