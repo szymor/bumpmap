@@ -9,7 +9,7 @@
 #define SCREEN_WIDTH		(320)
 #define SCREEN_HEIGHT		(240)
 #define SCREEN_BPP			(32)
-#define LIGHT_SIZE			(128)
+#define LIGHT_SIZE			(192)
 #define LIGHT_NUM			(3)
 
 #define blue(c)				((c) & 0xff)
